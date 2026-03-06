@@ -58,7 +58,7 @@ const HeroSection = () => {
               width={1280}
               height={720}
               alt="Lumina Dashboard Preview"
-              className="rounded-xl shadow-2xl border border-primary/20 mx-auto"
+              className="rounded-xl shadow-2xl border border-primary/20 mx-auto object-cover max-h-[600px] max-w-5xl"
               priority
             />
           </div>

@@ -29,9 +29,9 @@ export default async function Header() {
           <Image
             src={"/logo.png"}
             alt="Lumina Logo"
-            width={200}
-            height={60}
-            className="h-12 py-1 w-auto object-contain"
+            width={300}
+            height={80}
+            className="h-16 py-1 w-auto object-contain mix-blend-lighten"
           />
         </Link>
 
