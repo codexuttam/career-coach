@@ -28,13 +28,30 @@ export async function updateUser(data) {
 
         // If industry doesn't exist, create it with default values
         if (!industryInsight) {
-          const insights = await generateAIInsights(data.industry);
+          // Try generating AI insights. If it fails (rate limits / quota),
+          // create a placeholder industryInsight so onboarding can proceed.
+          let insights;
+          try {
+            insights = await generateAIInsights(data.industry);
+          } catch (err) {
+            console.error("generateAIInsights failed, creating placeholder insights:", err);
+            insights = {
+              salaryRanges: [],
+              growthRate: 0,
+              demandLevel: "Medium",
+              topSkills: [],
+              marketOutlook: "Neutral",
+              keyTrends: [],
+              recommendedSkills: [],
+            };
+          }
 
           industryInsight = await db.industryInsight.create({
             data: {
               industry: data.industry,
               ...insights,
-              nextUpdate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+              // schedule next update to try to refresh insights in background later
+              nextUpdate: new Date(Date.now() + 24 * 60 * 60 * 1000),
             },
           });
         }

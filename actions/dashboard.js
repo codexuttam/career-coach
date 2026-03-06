@@ -5,7 +5,7 @@ import { auth } from "@clerk/nextjs/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
 
 export const generateAIInsights = async (industry) => {
   const prompt = `
@@ -28,12 +28,38 @@ export const generateAIInsights = async (industry) => {
           Include at least 5 skills and trends.
         `;
 
-  const result = await model.generateContent(prompt);
-  const response = result.response;
-  const text = response.text();
-  const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
+  // Retry loop for transient failures like rate limits (429). If retries fail,
+  // rethrow so callers can decide on fallback behavior.
+  const maxRetries = 3;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const result = await model.generateContent(prompt);
+      const response = result.response;
+      const text = response.text();
+      const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
 
-  return JSON.parse(cleanedText);
+      return JSON.parse(cleanedText);
+    } catch (err) {
+      // If it's a 429 or mentions quota, treat as retryable. Otherwise rethrow.
+      const msg = String(err?.message || err);
+      const isRetryable = /429|Too Many Requests|quota|Quota exceeded/i.test(msg);
+
+      // Last attempt -> rethrow
+      if (attempt === maxRetries - 1 || !isRetryable) {
+        // attach attempt info for debugging
+        err.attempts = attempt + 1;
+        throw err;
+      }
+
+      // exponential backoff with jitter
+      const backoffMs = Math.pow(2, attempt) * 1000 + Math.floor(Math.random() * 500);
+      console.warn(`generateAIInsights: transient error (attempt ${attempt + 1}), retrying in ${backoffMs}ms:`, msg);
+      await new Promise((r) => setTimeout(r, backoffMs));
+      continue;
+    }
+  }
+  // Shouldn't reach here, but throw defensively
+  throw new Error("Failed to generate AI insights");
 };
 
 export async function getIndustryInsights() {
