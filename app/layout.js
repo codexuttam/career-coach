@@ -9,8 +9,8 @@ import { dark } from "@clerk/themes";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
-  title: "AI Career Coach",
-  description: "",
+  title: "Lumina - AI Career Assistant",
+  description: "Accelerate your career trajectory with Lumina's AI-driven insights, resume building, and interview preparation.",
 };
 
 export default function RootLayout({ children }) {
@@ -37,7 +37,7 @@ export default function RootLayout({ children }) {
 
             <footer className="bg-muted/50 py-12">
               <div className="container mx-auto px-4 text-center text-gray-200">
-                <p>Made with 💗 by RoadsideCoder</p>
+                <p>Designed to Empower Your Career | Lumina AI</p>
               </div>
             </footer>
           </ThemeProvider>
