@@ -2,10 +2,9 @@
 
 import { db } from "@/lib/prisma";
 import { auth } from "@clerk/nextjs/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getModel, callGemini } from "@/lib/gemini";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = getModel();
 
 export async function generateCoverLetter(data) {
   const { userId } = await auth();
@@ -18,9 +17,8 @@ export async function generateCoverLetter(data) {
   if (!user) throw new Error("User not found");
 
   const prompt = `
-    Write a professional cover letter for a ${data.jobTitle} position at ${
-    data.companyName
-  }.
+    Write a professional cover letter for a ${data.jobTitle} position at ${data.companyName
+    }.
     
     About the candidate:
     - Industry: ${user.industry}
@@ -44,8 +42,7 @@ export async function generateCoverLetter(data) {
   `;
 
   try {
-    const result = await model.generateContent(prompt);
-    const content = result.response.text().trim();
+    const content = (await callGemini(model, prompt)).trim();
 
     const coverLetter = await db.coverLetter.create({
       data: {
@@ -60,6 +57,11 @@ export async function generateCoverLetter(data) {
 
     return coverLetter;
   } catch (error) {
+    const msg = String(error?.message || error);
+    const isQuota = /429|quota|Quota exceeded|Too Many Requests/i.test(msg);
+    if (isQuota) {
+      throw new Error("AI quota exceeded for today. Please try again tomorrow or upgrade your Gemini plan.");
+    }
     console.error("Error generating cover letter:", error.message);
     throw new Error("Failed to generate cover letter");
   }

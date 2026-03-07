@@ -2,11 +2,10 @@
 
 import { db } from "@/lib/prisma";
 import { auth } from "@clerk/nextjs/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { revalidatePath } from "next/cache";
+import { getModel, callGemini } from "@/lib/gemini";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = getModel();
 
 export async function saveResume(content) {
   const { userId } = await auth();
@@ -87,11 +86,14 @@ export async function improveWithAI({ current, type }) {
   `;
 
   try {
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    const improvedContent = response.text().trim();
+    const improvedContent = (await callGemini(model, prompt)).trim();
     return improvedContent;
   } catch (error) {
+    const msg = String(error?.message || error);
+    const isQuota = /429|quota|Quota exceeded|Too Many Requests/i.test(msg);
+    if (isQuota) {
+      throw new Error("AI quota exceeded for today. Please try again tomorrow or upgrade your Gemini plan.");
+    }
     console.error("Error improving content:", error);
     throw new Error("Failed to improve content");
   }

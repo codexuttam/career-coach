@@ -16,6 +16,8 @@ import {
   TrendingUp,
   TrendingDown,
   Brain,
+  AlertCircle,
+  RefreshCw,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import {
@@ -29,8 +31,14 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 
 const DashboardView = ({ insights }) => {
+  // Detect placeholder / empty data (saved when AI quota was exceeded during onboarding)
+  const isPlaceholder =
+    !insights.salaryRanges?.length ||
+    !insights.topSkills?.length ||
+    !insights.keyTrends?.length;
+
   // Transform salary data for the chart
-  const salaryData = insights.salaryRanges.map((range) => ({
+  const salaryData = (insights.salaryRanges ?? []).map((range) => ({
     name: range.role,
     min: range.min / 1000,
     max: range.max / 1000,
@@ -78,6 +86,22 @@ const DashboardView = ({ insights }) => {
       <div className="flex justify-between items-center">
         <Badge variant="outline">Last updated: {lastUpdatedDate}</Badge>
       </div>
+
+      {/* Empty-data notice */}
+      {isPlaceholder && (
+        <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-600 dark:text-yellow-400">
+          <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="font-medium">Industry data is being generated</p>
+            <p className="text-xs mt-0.5 text-muted-foreground">
+              The AI couldn't populate your insights during onboarding (quota limit). Refresh
+              this page in a moment — it will automatically retry and fill in your salary
+              ranges, top skills, trends, and more.
+            </p>
+          </div>
+          <RefreshCw className="h-4 w-4 mt-0.5 ml-auto flex-shrink-0 animate-spin opacity-50" />
+        </div>
+      )}
 
       {/* Market Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -153,33 +177,41 @@ const DashboardView = ({ insights }) => {
         </CardHeader>
         <CardContent>
           <div className="h-[400px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={salaryData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip
-                  content={({ active, payload, label }) => {
-                    if (active && payload && payload.length) {
-                      return (
-                        <div className="bg-background border rounded-lg p-2 shadow-md">
-                          <p className="font-medium">{label}</p>
-                          {payload.map((item) => (
-                            <p key={item.name} className="text-sm">
-                              {item.name}: ${item.value}K
-                            </p>
-                          ))}
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <Bar dataKey="min" fill="#94a3b8" name="Min Salary (K)" />
-                <Bar dataKey="median" fill="#64748b" name="Median Salary (K)" />
-                <Bar dataKey="max" fill="#475569" name="Max Salary (K)" />
-              </BarChart>
-            </ResponsiveContainer>
+            {salaryData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={salaryData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis />
+                  <Tooltip
+                    content={({ active, payload, label }) => {
+                      if (active && payload && payload.length) {
+                        return (
+                          <div className="bg-background border rounded-lg p-2 shadow-md">
+                            <p className="font-medium">{label}</p>
+                            {payload.map((item) => (
+                              <p key={item.name} className="text-sm">
+                                {item.name}: ${item.value}K
+                              </p>
+                            ))}
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Bar dataKey="min" fill="#94a3b8" name="Min Salary (K)" />
+                  <Bar dataKey="median" fill="#64748b" name="Median Salary (K)" />
+                  <Bar dataKey="max" fill="#475569" name="Max Salary (K)" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                <AlertCircle className="h-10 w-10 opacity-30" />
+                <p className="text-sm">Salary data will appear once AI insights are generated.</p>
+                <p className="text-xs">Refresh the page to retry.</p>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -194,14 +226,18 @@ const DashboardView = ({ insights }) => {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <ul className="space-y-4">
-              {insights.keyTrends.map((trend, index) => (
-                <li key={index} className="flex items-start space-x-2">
-                  <div className="h-2 w-2 mt-2 rounded-full bg-primary" />
-                  <span>{trend}</span>
-                </li>
-              ))}
-            </ul>
+            {insights.keyTrends?.length > 0 ? (
+              <ul className="space-y-4">
+                {insights.keyTrends.map((trend, index) => (
+                  <li key={index} className="flex items-start space-x-2">
+                    <div className="h-2 w-2 mt-2 rounded-full bg-primary" />
+                    <span>{trend}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground italic">Trends will appear once AI insights are generated. Refresh to retry.</p>
+            )}
           </CardContent>
         </Card>
 
@@ -211,13 +247,17 @@ const DashboardView = ({ insights }) => {
             <CardDescription>Skills to consider developing</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {insights.recommendedSkills.map((skill) => (
-                <Badge key={skill} variant="outline">
-                  {skill}
-                </Badge>
-              ))}
-            </div>
+            {insights.recommendedSkills?.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {insights.recommendedSkills.map((skill) => (
+                  <Badge key={skill} variant="outline">
+                    {skill}
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground italic">Skill recommendations will appear once AI insights are generated. Refresh to retry.</p>
+            )}
           </CardContent>
         </Card>
       </div>

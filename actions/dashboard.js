@@ -2,10 +2,9 @@
 
 import { db } from "@/lib/prisma";
 import { auth } from "@clerk/nextjs/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getModel, callGeminiJSON } from "@/lib/gemini";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
+const model = getModel();
 
 export const generateAIInsights = async (industry) => {
   const prompt = `
@@ -28,38 +27,8 @@ export const generateAIInsights = async (industry) => {
           Include at least 5 skills and trends.
         `;
 
-  // Retry loop for transient failures like rate limits (429). If retries fail,
-  // rethrow so callers can decide on fallback behavior.
-  const maxRetries = 3;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const result = await model.generateContent(prompt);
-      const response = result.response;
-      const text = response.text();
-      const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
-
-      return JSON.parse(cleanedText);
-    } catch (err) {
-      // If it's a 429 or mentions quota, treat as retryable. Otherwise rethrow.
-      const msg = String(err?.message || err);
-      const isRetryable = /429|Too Many Requests|quota|Quota exceeded/i.test(msg);
-
-      // Last attempt -> rethrow
-      if (attempt === maxRetries - 1 || !isRetryable) {
-        // attach attempt info for debugging
-        err.attempts = attempt + 1;
-        throw err;
-      }
-
-      // exponential backoff with jitter
-      const backoffMs = Math.pow(2, attempt) * 1000 + Math.floor(Math.random() * 500);
-      console.warn(`generateAIInsights: transient error (attempt ${attempt + 1}), retrying in ${backoffMs}ms:`, msg);
-      await new Promise((r) => setTimeout(r, backoffMs));
-      continue;
-    }
-  }
-  // Shouldn't reach here, but throw defensively
-  throw new Error("Failed to generate AI insights");
+  // callGeminiJSON already handles: fast-fail on daily quota, retry on per-minute limits.
+  return await callGeminiJSON(model, prompt);
 };
 
 export async function getIndustryInsights() {
@@ -68,27 +37,69 @@ export async function getIndustryInsights() {
 
   const user = await db.user.findUnique({
     where: { clerkUserId: userId },
-    include: {
-      industryInsight: true,
-    },
+    include: { industryInsight: true },
   });
 
   if (!user) throw new Error("User not found");
 
-  // If no insights exist, generate them
-  if (!user.industryInsight) {
-    const insights = await generateAIInsights(user.industry);
+  const insight = user.industryInsight;
 
-    const industryInsight = await db.industryInsight.create({
-      data: {
+  // Detect placeholder / empty data saved during onboarding when AI quota was exhausted.
+  // A real insight will always have salary ranges and a non-zero growth rate.
+  const isPlaceholder =
+    !insight ||
+    (Array.isArray(insight.salaryRanges) && insight.salaryRanges.length === 0) ||
+    (Array.isArray(insight.topSkills) && insight.topSkills.length === 0);
+
+  const isStale = insight && new Date() > new Date(insight.nextUpdate);
+
+  if (isPlaceholder || isStale) {
+    try {
+      const fresh = await generateAIInsights(user.industry);
+
+      if (!insight) {
+        // No record at all — create one.
+        return await db.industryInsight.create({
+          data: {
+            industry: user.industry,
+            ...fresh,
+            nextUpdate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          },
+        });
+      }
+
+      // Existing placeholder/stale record — update in place.
+      return await db.industryInsight.update({
+        where: { industry: user.industry },
+        data: {
+          ...fresh,
+          lastUpdated: new Date(),
+          nextUpdate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+      });
+    } catch (aiErr) {
+      console.warn(
+        "[getIndustryInsights] AI unavailable, returning existing data:",
+        aiErr?.message
+      );
+      // Return whatever we have (even placeholder) so the page still renders.
+      if (insight) return insight;
+
+      // No record at all and AI failed — return a safe empty shell.
+      return {
         industry: user.industry,
-        ...insights,
-        nextUpdate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    });
-
-    return industryInsight;
+        salaryRanges: [],
+        growthRate: 0,
+        demandLevel: "Medium",
+        topSkills: [],
+        marketOutlook: "Neutral",
+        keyTrends: [],
+        recommendedSkills: [],
+        lastUpdated: new Date(),
+        nextUpdate: new Date(Date.now() + 60 * 60 * 1000), // retry in 1hr
+      };
+    }
   }
 
-  return user.industryInsight;
+  return insight;
 }
